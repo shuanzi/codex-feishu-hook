@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -43,6 +44,23 @@ def normalize_summary(value: Any, max_chars: int) -> str:
     if prefix and prefix[-1].isspace():
         return prefix.rstrip() + " …"
     return prefix.rstrip() + "…"
+
+
+def escape_lark_markdown(value: str) -> str:
+    """Render dynamic content literally inside a Feishu ``lark_md`` field."""
+    escaped = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    for character in "\\`*_{}[]()!|~":
+        escaped = escaped.replace(character, f"\\{character}")
+    escaped = re.sub(
+        r"(?m)^(\s{0,3})([#>+\-])\s",
+        r"\1\\\2 ",
+        escaped,
+    )
+    return re.sub(
+        r"(?m)^(\s{0,3})(\d+)\.\s",
+        r"\g<1>\g<2>\\. ",
+        escaped,
+    )
 
 
 def make_feishu_sign(timestamp: int, secret: str) -> str:
@@ -171,7 +189,8 @@ def build_feishu_payload(
             "text": {
                 "tag": "lark_md",
                 "content": "\n".join(
-                    f"**{label}：** {value}" for label, value in fields
+                    f"**{label}：** {escape_lark_markdown(value)}"
+                    for label, value in fields
                 ),
             },
         }
@@ -184,7 +203,9 @@ def build_feishu_payload(
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": f"**结果摘要：**\n{summary}",
+                        "content": (
+                            f"**结果摘要：**\n{escape_lark_markdown(summary)}"
+                        ),
                     },
                 },
             ]

@@ -187,6 +187,32 @@ class NotifierTests(unittest.TestCase):
         self.assertNotIn("目录", content)
         self.assertNotIn("Done", content)
 
+    def test_build_card_payload_escapes_dynamic_lark_markdown(self) -> None:
+        payload = notifier.build_feishu_payload(
+            {
+                "type": "agent-turn-complete",
+                "cwd": "/work/project_[card]",
+                "last-assistant-message": (
+                    "<at id=all></at> **Done**\n"
+                    "- [details](https://example.invalid)\n"
+                    "1. First item"
+                ),
+            },
+            {"include_cwd": True, "include_summary": True},
+            now=datetime.fromtimestamp(1_700_000_000, tz=timezone.utc),
+        )
+
+        elements = payload["card"]["elements"]
+        metadata = elements[0]["text"]["content"]
+        summary = elements[2]["text"]["content"]
+        self.assertIn(r"**项目：** project\_\[card\]", metadata)
+        self.assertIn(r"**目录：** /work/project\_\[card\]", metadata)
+        self.assertIn("&lt;at id=all&gt;&lt;/at&gt;", summary)
+        self.assertIn(r"\*\*Done\*\*", summary)
+        self.assertIn(r"\- \[details\]\(https://example.invalid\)", summary)
+        self.assertIn(r"1\. First item", summary)
+        self.assertNotIn("<at id=all>", summary)
+
     def test_post_feishu_accepts_new_and_legacy_success_responses(self) -> None:
         requests: list[Any] = []
 
