@@ -58,22 +58,22 @@ cd codex-feishu-hook
 ```bash
 read -r -p "Feishu Webhook URL: " FEISHU_WEBHOOK_URL
 read -r -s -p "Feishu 签名密钥（未开启签名可直接回车）: " FEISHU_SIGN_SECRET
+read -r -p "Hook 标签（可选，直接回车跳过）: " FEISHU_HOOK_TAG
 echo
 export FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET
 
-./install.sh --send-test
+./install.sh \
+  --tag "$FEISHU_HOOK_TAG" \
+  --send-test
 
-unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET
+unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET FEISHU_HOOK_TAG
 ```
+
+标签会作为 `--tag` 参数传给安装器；直接回车时保存为空，后续通知不显示标签。
 
 没有开启飞书签名校验时，也可以直接执行：
 
 ```bash
-./install.sh \
-  --webhook-url 'https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxx' \
-  --send-test
-  
-  
 ./install.sh \
   --webhook-url 'https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxx' \
   --send-test
@@ -151,6 +151,16 @@ unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET
   --no-cwd \
   --summary-max-chars 300
 ```
+
+例如，为这一套 Hook 通知标记发布阶段：
+
+```bash
+./install.sh \
+  --webhook-url "$FEISHU_WEBHOOK_URL" \
+  --tag "P6"
+```
+
+`--tag` 是安装级配置：重装时可更新，之后的每条通知都会携带该标签；未设置或仅包含空白时不显示。
 
 重复执行安装命令会更新脚本和私有配置，不会重复添加飞书 `Stop` Hook。
 
