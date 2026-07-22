@@ -77,6 +77,7 @@ class NotifierTests(unittest.TestCase):
         config = {
             "include_summary": True,
             "summary_max_chars": 600,
+            "include_turn_id": True,
             "include_cwd": False,
         }
         now = datetime(2026, 7, 22, 15, 30, tzinfo=timezone.utc)
@@ -85,7 +86,7 @@ class NotifierTests(unittest.TestCase):
 
         self.assertIn("✅ Codex 本轮已完成", message)
         self.assertIn("项目：android-to-harmonyos", message)
-        self.assertIn("Turn：567890abcdef", message)
+        self.assertNotIn("\nTurn：", message)
         self.assertIn("Completed migration tests.", message)
         self.assertNotIn("private user prompt", message)
         self.assertNotIn("thread-secret", message)
@@ -123,6 +124,44 @@ class NotifierTests(unittest.TestCase):
 
         self.assertIn("目录：/workspace/codex-feishu-hook", message)
 
+    def test_build_message_orders_metadata_and_ignores_legacy_turn_config(self) -> None:
+        event = {
+            "type": "agent-turn-complete",
+            "turn-id": "1234567890abcdef",
+            "cwd": "/work/sample",
+        }
+        now = datetime(2026, 7, 22, 9, 0, tzinfo=timezone.utc)
+
+        for include_turn_id in (True, False):
+            with self.subTest(include_turn_id=include_turn_id):
+                message = notifier.build_message(
+                    event,
+                    {
+                        "tag": "  P6\r\nrelease  ",
+                        "include_turn_id": include_turn_id,
+                        "include_cwd": True,
+                        "summary_max_chars": 0,
+                    },
+                    now=now,
+                )
+
+                lines = message.splitlines()
+                self.assertEqual(lines[1], "标签：P6 release")
+                self.assertEqual(lines[2], "项目：sample")
+                self.assertEqual(lines[3], "目录：/work/sample")
+                self.assertTrue(lines[4].startswith("时间："))
+                self.assertNotIn("\nTurn：", message)
+                self.assertEqual(len(lines), 5)
+
+    def test_build_message_omits_missing_or_blank_tag(self) -> None:
+        event = {"type": "agent-turn-complete", "cwd": "/work/sample"}
+        now = datetime(2026, 7, 22, 9, 0, tzinfo=timezone.utc)
+
+        for config in ({}, {"tag": ""}, {"tag": " \t\n "}):
+            with self.subTest(config=config):
+                message = notifier.build_message(event, config, now=now)
+                self.assertNotIn("标签：", message)
+
     def test_build_card_payload_adds_signature_when_configured(self) -> None:
         event = {
             "type": "agent-turn-complete",
@@ -132,8 +171,10 @@ class NotifierTests(unittest.TestCase):
         }
         config = {
             "sign_secret": "secret",
+            "tag": "P6",
             "include_summary": True,
             "summary_max_chars": 100,
+            "include_turn_id": True,
         }
         now = datetime.fromtimestamp(1_700_000_000, tz=timezone.utc)
 
@@ -159,8 +200,12 @@ class NotifierTests(unittest.TestCase):
             [element["tag"] for element in card["elements"]],
             ["div", "hr", "div"],
         )
-        self.assertIn("**项目：** sample", card["elements"][0]["text"]["content"])
-        self.assertIn("**Turn：** turn-1", card["elements"][0]["text"]["content"])
+        metadata_lines = card["elements"][0]["text"]["content"].splitlines()
+        self.assertEqual(metadata_lines[0], "**标签：** P6")
+        self.assertEqual(metadata_lines[1], "**项目：** sample")
+        self.assertEqual(metadata_lines[2], "**目录：** /work/sample")
+        self.assertTrue(metadata_lines[3].startswith("**时间：** "))
+        self.assertNotIn("Turn", card["elements"][0]["text"]["content"])
         self.assertIn("**结果摘要：**\nDone", card["elements"][2]["text"]["content"])
 
     def test_build_card_payload_omits_disabled_optional_fields(self) -> None:
@@ -212,6 +257,26 @@ class NotifierTests(unittest.TestCase):
         self.assertIn(r"\- \[details\]\(https://example.invalid\)", summary)
         self.assertIn(r"1\. First item", summary)
         self.assertNotIn("<at id=all>", summary)
+
+    def test_build_card_payload_normalizes_and_escapes_tag_lark_markdown(self) -> None:
+        payload = notifier.build_feishu_payload(
+            {"type": "agent-turn-complete", "cwd": "/work/sample"},
+            {
+                "tag": "  <at id=all></at> **P6**\r\nTurn：forged\t[release]  ",
+                "include_cwd": False,
+            },
+            now=datetime(2026, 7, 22, 9, 0, tzinfo=timezone.utc),
+        )
+
+        metadata = payload["card"]["elements"][0]["text"]["content"]
+        lines = metadata.splitlines()
+        self.assertEqual(
+            lines[0],
+            r"**标签：** &lt;at id=all&gt;&lt;/at&gt; \*\*P6\*\* Turn：forged \[release\]",
+        )
+        self.assertEqual(lines[1], "**项目：** sample")
+        self.assertTrue(lines[2].startswith("**时间：** "))
+        self.assertEqual(len(lines), 3)
 
     def test_post_feishu_accepts_new_and_legacy_success_responses(self) -> None:
         requests: list[Any] = []

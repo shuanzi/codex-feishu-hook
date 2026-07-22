@@ -129,6 +129,8 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue(config["include_cwd"])
             self.assertEqual(config["summary_max_chars"], 321)
             self.assertEqual(config["timeout_seconds"], 3.5)
+            self.assertEqual(config["tag"], "")
+            self.assertNotIn("include_turn_id", config)
 
             self.assertEqual(config_toml.read_text(encoding="utf-8"), original_config)
             hooks = json.loads(hooks_json.read_text(encoding="utf-8"))
@@ -144,6 +146,9 @@ class InstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             self.run_script(INSTALLER, home, "--webhook-url", WEBHOOK)
+            installed = home / ".codex" / "hooks" / "codex_feishu_notify.py"
+            installed.write_text("# old hook content\n", encoding="utf-8")
+            installed.chmod(0o600)
             updated_webhook = WEBHOOK + "-updated"
             self.run_script(
                 INSTALLER,
@@ -152,6 +157,8 @@ class InstallerTests(unittest.TestCase):
                 updated_webhook,
                 "--project-name",
                 "Migration Kit",
+                "--tag",
+                " P6 ",
             )
 
             hooks = json.loads(
@@ -162,9 +169,17 @@ class InstallerTests(unittest.TestCase):
                     encoding="utf-8"
                 )
             )
-            self.assertEqual(len(self.feishu_stop_groups(hooks)), 1)
+            feishu_groups = self.feishu_stop_groups(hooks)
+            self.assertEqual(len(feishu_groups), 1)
+            self.assertEqual(len(feishu_groups[0]["hooks"]), 1)
+            self.assertEqual(
+                installed.read_text(encoding="utf-8"),
+                (ROOT / "bin" / "codex_feishu_notify.py").read_text(encoding="utf-8"),
+            )
+            self.assertTrue(installed.stat().st_mode & stat.S_IXUSR)
             self.assertEqual(private_config["webhook_url"], updated_webhook)
             self.assertEqual(private_config["project_name"], "Migration Kit")
+            self.assertEqual(private_config["tag"], " P6 ")
             self.assertTrue(private_config["include_cwd"])
 
     def test_install_ignores_existing_top_level_notify(self) -> None:

@@ -17,6 +17,7 @@ INCLUDE_CWD=true
 SUMMARY_MAX_CHARS=600
 TIMEOUT_SECONDS=4
 PROJECT_NAME=""
+TAG=""
 TITLE="✅ Codex 本轮已完成"
 SEND_TEST=false
 
@@ -34,6 +35,7 @@ Options:
   --summary-max-chars N    Maximum summary length, 0-4000 (default: 600).
   --timeout-seconds N      HTTP timeout, >0 and <=30 (default: 4).
   --project-name NAME      Override the project name in notifications.
+  --tag TEXT               Add a tag to notifications.
   --title TEXT             Override the notification title.
   --send-test              Send a real test message after installation.
   -h, --help               Show this help.
@@ -68,6 +70,9 @@ while [[ $# -gt 0 ]]; do
     --project-name)
       [[ $# -ge 2 ]] || { echo "missing value for --project-name" >&2; exit 2; }
       PROJECT_NAME="$2"; shift 2 ;;
+    --tag)
+      [[ $# -ge 2 ]] || { echo "missing value for --tag" >&2; exit 2; }
+      TAG="$2"; shift 2 ;;
     --title)
       [[ $# -ge 2 ]] || { echo "missing value for --title" >&2; exit 2; }
       TITLE="$2"; shift 2 ;;
@@ -196,6 +201,7 @@ INCLUDE_CWD="$INCLUDE_CWD" \
 SUMMARY_MAX_CHARS="$SUMMARY_MAX_CHARS" \
 TIMEOUT_SECONDS="$TIMEOUT_SECONDS" \
 PROJECT_NAME="$PROJECT_NAME" \
+TAG="$TAG" \
 TITLE="$TITLE" \
 TEMP_CONFIG="$TEMP_CONFIG" \
 python3 <<'PY'
@@ -209,9 +215,9 @@ payload = {
     "sign_secret": os.environ["SIGN_SECRET"],
     "title": os.environ["TITLE"],
     "project_name": os.environ["PROJECT_NAME"],
+    "tag": os.environ["TAG"],
     "include_summary": os.environ["INCLUDE_SUMMARY"].lower() == "true",
     "summary_max_chars": int(os.environ["SUMMARY_MAX_CHARS"]),
-    "include_turn_id": True,
     "include_cwd": os.environ["INCLUDE_CWD"].lower() == "true",
     "timeout_seconds": float(os.environ["TIMEOUT_SECONDS"]),
 }

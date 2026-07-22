@@ -1,6 +1,6 @@
 # Codex 飞书完成通知 Hook
 
-当 Codex 停止一轮 Agent Turn 后，通过飞书群自定义机器人发送一条通知。
+当 Codex 完成一轮工作后，通过飞书群自定义机器人发送一条通知。
 
 本工具包通过 Codex 用户级 `Stop` Hook 触发通知，不修改现有的 `~/.codex/config.toml` 或顶层 `notify`。运行时只依赖 Python 标准库，不依赖 `requests` 或其他第三方包。
 
@@ -8,7 +8,7 @@
 
 - 每次 `Stop` 事件发送一张飞书交互式消息卡片。
 - 支持飞书机器人签名校验。
-- 支持项目名、工作目录、Turn ID 和最终回复摘要的开关与裁剪。
+- 支持项目名、标签、工作目录和最终回复摘要的开关与裁剪。
 - 不发送 `input-messages`，也不读取或上传完整会话 transcript。
 - 网络失败、飞书拒绝或配置错误默认只写本地日志，不阻塞 Codex 完成本轮工作。
 - 安装脚本幂等合并 `~/.codex/hooks.json`，不会覆盖无关 Hook 或顶层 `notify`。
@@ -58,22 +58,22 @@ cd codex-feishu-hook
 ```bash
 read -r -p "Feishu Webhook URL: " FEISHU_WEBHOOK_URL
 read -r -s -p "Feishu 签名密钥（未开启签名可直接回车）: " FEISHU_SIGN_SECRET
+read -r -p "Hook 标签（可选，直接回车跳过）: " FEISHU_HOOK_TAG
 echo
 export FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET
 
-./install.sh --send-test
+./install.sh \
+  --tag "$FEISHU_HOOK_TAG" \
+  --send-test
 
-unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET
+unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET FEISHU_HOOK_TAG
 ```
+
+标签会作为 `--tag` 参数传给安装器；直接回车时保存为空，后续通知不显示标签。
 
 没有开启飞书签名校验时，也可以直接执行：
 
 ```bash
-./install.sh \
-  --webhook-url 'https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxx' \
-  --send-test
-  
-  
 ./install.sh \
   --webhook-url 'https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxx' \
   --send-test
@@ -129,6 +129,7 @@ unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET
 --summary-max-chars N    摘要上限，0～4000，默认 600
 --timeout-seconds N      网络超时，最大 30 秒，默认 4 秒
 --project-name NAME      固定覆盖项目名
+--tag TEXT               在项目前显示的标签
 --title TEXT             自定义消息标题
 --send-test              安装后立即发送真实测试消息
 ```
@@ -151,6 +152,16 @@ unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET
   --summary-max-chars 300
 ```
 
+例如，为这一套 Hook 通知标记发布阶段：
+
+```bash
+./install.sh \
+  --webhook-url "$FEISHU_WEBHOOK_URL" \
+  --tag "P6"
+```
+
+`--tag` 是安装级配置：重装时可更新，之后的每条通知都会携带该标签；未设置或仅包含空白时不显示。
+
 重复执行安装命令会更新脚本和私有配置，不会重复添加飞书 `Stop` Hook。
 
 ## 五、通知示例
@@ -159,10 +170,10 @@ unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET
 
 ```text
 ✅ Codex 本轮已完成
+标签：P6
 项目：android-to-harmonyos
-时间：2026-07-22 15:30:00 +08
-Turn：567890abcdef
 目录：/Users/你的用户名/Documents/code/android-to-harmonyos
+时间：2026-07-22 15:30:00 +08
 
 结果摘要：
 已完成当前阶段实现，测试全部通过。
@@ -171,7 +182,7 @@ Turn：567890abcdef
 默认行为：
 
 - 项目名取当前 `cwd` 最后一段。
-- Turn ID 只展示最后 12 个字符。
+- 标签的连续空白折叠为一个普通空格；空标签不显示。
 - 最终回复会去掉多余空行并截断到 600 字。
 - 不发送用户输入。
 - 不发送 thread ID。
@@ -212,9 +223,9 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/codex-feishu/config.json
   "sign_secret": "",
   "title": "✅ Codex 本轮已完成",
   "project_name": "",
+  "tag": "",
   "include_summary": true,
   "summary_max_chars": 600,
-  "include_turn_id": true,
   "include_cwd": true,
   "timeout_seconds": 4
 }
@@ -286,7 +297,7 @@ python3 -m json.tool "$HOME/.codex/hooks.json"
 
 ### Codex 正常完成但日志有网络错误
 
-这是预期的降级方式。通知网络故障只记录日志，适配器默认返回成功，不会把已经完成的 Codex turn 标记为失败。
+这是预期的降级方式。通知网络故障只记录日志，适配器默认返回成功，不会把已经完成的工作标记为失败。
 
 ## 十、卸载
 
