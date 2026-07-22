@@ -8,7 +8,7 @@
 
 - 每次 `Stop` 事件发送一张飞书交互式消息卡片。
 - 支持飞书机器人签名校验。
-- 支持项目名、工作目录、Turn ID 和最终回复摘要的开关与裁剪。
+- 支持项目名、标签、工作目录、Turn ID 和最终回复摘要的开关与裁剪。
 - 不发送 `input-messages`，也不读取或上传完整会话 transcript。
 - 网络失败、飞书拒绝或配置错误默认只写本地日志，不阻塞 Codex 完成本轮工作。
 - 安装脚本幂等合并 `~/.codex/hooks.json`，不会覆盖无关 Hook 或顶层 `notify`。
@@ -129,6 +129,7 @@ unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET
 --summary-max-chars N    摘要上限，0～4000，默认 600
 --timeout-seconds N      网络超时，最大 30 秒，默认 4 秒
 --project-name NAME      固定覆盖项目名
+--tag TEXT               在项目与时间后显示的标签
 --title TEXT             自定义消息标题
 --send-test              安装后立即发送真实测试消息
 ```
@@ -161,6 +162,7 @@ unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET
 ✅ Codex 本轮已完成
 项目：android-to-harmonyos
 时间：2026-07-22 15:30:00 +08
+标签：P6
 Turn：567890abcdef
 目录：/Users/你的用户名/Documents/code/android-to-harmonyos
 
@@ -171,6 +173,7 @@ Turn：567890abcdef
 默认行为：
 
 - 项目名取当前 `cwd` 最后一段。
+- 标签的连续空白折叠为一个普通空格；空标签不显示。
 - Turn ID 只展示最后 12 个字符。
 - 最终回复会去掉多余空行并截断到 600 字。
 - 不发送用户输入。
@@ -212,6 +215,7 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/codex-feishu/config.json
   "sign_secret": "",
   "title": "✅ Codex 本轮已完成",
   "project_name": "",
+  "tag": "",
   "include_summary": true,
   "summary_max_chars": 600,
   "include_turn_id": true,

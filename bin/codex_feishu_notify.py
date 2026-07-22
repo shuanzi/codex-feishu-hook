@@ -125,6 +125,7 @@ def _message_parts(
     cwd = str(event.get("cwd") or "")
     configured_project = str(config.get("project_name") or "").strip()
     project = configured_project or (Path(cwd).name if cwd else "Unknown project")
+    tag = " ".join(str(config.get("tag") or "").split())
 
     turn_id = str(event_field(event, "turn-id", "turn_id", ""))
     assistant_message = event_field(
@@ -150,6 +151,8 @@ def _message_parts(
         ("项目", project),
         ("时间", current.strftime("%Y-%m-%d %H:%M:%S %Z")),
     ]
+    if tag:
+        fields.append(("标签", tag))
 
     if turn_id and bool(config.get("include_turn_id", True)):
         fields.append(("Turn", turn_id[-12:]))

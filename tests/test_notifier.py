@@ -123,6 +123,35 @@ class NotifierTests(unittest.TestCase):
 
         self.assertIn("目录：/workspace/codex-feishu-hook", message)
 
+    def test_build_message_normalizes_tag_to_a_single_metadata_line(self) -> None:
+        message = notifier.build_message(
+            {
+                "type": "agent-turn-complete",
+                "cwd": "/work/sample",
+            },
+            {
+                "tag": "  P6\r\nTurn：forged\t目录：forged  ",
+                "include_cwd": False,
+                "summary_max_chars": 0,
+            },
+            now=datetime(2026, 7, 22, 9, 0, tzinfo=timezone.utc),
+        )
+
+        lines = message.splitlines()
+        self.assertEqual(lines[1], "项目：sample")
+        self.assertTrue(lines[2].startswith("时间："))
+        self.assertEqual(lines[3], "标签：P6 Turn：forged 目录：forged")
+        self.assertEqual(len(lines), 4)
+
+    def test_build_message_omits_missing_or_blank_tag(self) -> None:
+        event = {"type": "agent-turn-complete", "cwd": "/work/sample"}
+        now = datetime(2026, 7, 22, 9, 0, tzinfo=timezone.utc)
+
+        for config in ({}, {"tag": ""}, {"tag": " \t\n "}):
+            with self.subTest(config=config):
+                message = notifier.build_message(event, config, now=now)
+                self.assertNotIn("标签：", message)
+
     def test_build_card_payload_adds_signature_when_configured(self) -> None:
         event = {
             "type": "agent-turn-complete",
@@ -212,6 +241,26 @@ class NotifierTests(unittest.TestCase):
         self.assertIn(r"\- \[details\]\(https://example.invalid\)", summary)
         self.assertIn(r"1\. First item", summary)
         self.assertNotIn("<at id=all>", summary)
+
+    def test_build_card_payload_normalizes_and_escapes_tag_lark_markdown(self) -> None:
+        payload = notifier.build_feishu_payload(
+            {"type": "agent-turn-complete", "cwd": "/work/sample"},
+            {
+                "tag": "  <at id=all></at> **P6**\r\nTurn：forged\t[release]  ",
+                "include_cwd": False,
+            },
+            now=datetime(2026, 7, 22, 9, 0, tzinfo=timezone.utc),
+        )
+
+        metadata = payload["card"]["elements"][0]["text"]["content"]
+        lines = metadata.splitlines()
+        self.assertEqual(lines[0], "**项目：** sample")
+        self.assertTrue(lines[1].startswith("**时间：** "))
+        self.assertEqual(
+            lines[2],
+            r"**标签：** &lt;at id=all&gt;&lt;/at&gt; \*\*P6\*\* Turn：forged \[release\]",
+        )
+        self.assertEqual(len(lines), 3)
 
     def test_post_feishu_accepts_new_and_legacy_success_responses(self) -> None:
         requests: list[Any] = []

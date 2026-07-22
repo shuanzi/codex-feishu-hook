@@ -129,6 +129,7 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue(config["include_cwd"])
             self.assertEqual(config["summary_max_chars"], 321)
             self.assertEqual(config["timeout_seconds"], 3.5)
+            self.assertEqual(config["tag"], "")
 
             self.assertEqual(config_toml.read_text(encoding="utf-8"), original_config)
             hooks = json.loads(hooks_json.read_text(encoding="utf-8"))
@@ -152,6 +153,8 @@ class InstallerTests(unittest.TestCase):
                 updated_webhook,
                 "--project-name",
                 "Migration Kit",
+                "--tag",
+                " P6 ",
             )
 
             hooks = json.loads(
@@ -165,6 +168,7 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(len(self.feishu_stop_groups(hooks)), 1)
             self.assertEqual(private_config["webhook_url"], updated_webhook)
             self.assertEqual(private_config["project_name"], "Migration Kit")
+            self.assertEqual(private_config["tag"], " P6 ")
             self.assertTrue(private_config["include_cwd"])
 
     def test_install_ignores_existing_top_level_notify(self) -> None:
