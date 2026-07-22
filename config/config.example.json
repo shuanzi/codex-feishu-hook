@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/replace-me",
+  "sign_secret": "",
+  "title": "✅ Codex 本轮已完成",
+  "project_name": "",
+  "include_summary": true,
+  "summary_max_chars": 600,
+  "include_turn_id": true,
+  "include_cwd": true,
+  "timeout_seconds": 4
+}

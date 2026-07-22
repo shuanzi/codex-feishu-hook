@@ -1,0 +1,275 @@
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import stat
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+INSTALLER = ROOT / "install.sh"
+UNINSTALLER = ROOT / "uninstall.sh"
+WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/test-token"
+
+
+class InstallerTests(unittest.TestCase):
+    def run_script(
+        self,
+        script: Path,
+        home: Path,
+        *args: str,
+        expected: int = 0,
+    ) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["HOME"] = str(home)
+        env["XDG_CONFIG_HOME"] = str(home / ".config")
+        result = subprocess.run(
+            ["bash", str(script), *args],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(
+            result.returncode,
+            expected,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        return result
+
+    @staticmethod
+    def ottey_hooks() -> dict[str, object]:
+        return {
+            "hooks": {
+                "Stop": [
+                    {
+                        "_otty": True,
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "/Applications/Otty.app/Contents/Resources/otty-hook.sh idle",
+                            }
+                        ],
+                    }
+                ],
+                "SessionStart": [
+                    {
+                        "_otty": True,
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "/Applications/Otty.app/Contents/Resources/otty-hook.sh startup",
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+
+    @staticmethod
+    def write_json(path: Path, value: object) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def feishu_stop_groups(hooks: dict[str, object]) -> list[dict[str, object]]:
+        stop_groups = hooks["hooks"]["Stop"]
+        return [
+            group
+            for group in stop_groups
+            if any(
+                "codex_feishu_notify.py" in handler.get("command", "")
+                for handler in group.get("hooks", [])
+            )
+        ]
+
+    def test_install_creates_private_config_and_user_stop_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            config_toml = home / ".codex" / "config.toml"
+            hooks_json = home / ".codex" / "hooks.json"
+            original_config = 'notify = ["/existing/notifier", "turn-ended"]\n'
+            config_toml.parent.mkdir(parents=True)
+            config_toml.write_text(original_config, encoding="utf-8")
+            existing_hooks = self.ottey_hooks()
+            self.write_json(hooks_json, existing_hooks)
+
+            self.run_script(
+                INSTALLER,
+                home,
+                "--webhook-url",
+                WEBHOOK,
+                "--sign-secret",
+                "test-secret",
+                "--no-summary",
+                "--include-cwd",
+                "--summary-max-chars",
+                "321",
+                "--timeout-seconds",
+                "3.5",
+            )
+
+            installed = home / ".codex" / "hooks" / "codex_feishu_notify.py"
+            private_config = home / ".config" / "codex-feishu" / "config.json"
+            hook_state = home / ".config" / "codex-feishu" / "user-hook-state.json"
+            self.assertTrue(installed.exists())
+            self.assertTrue(installed.stat().st_mode & stat.S_IXUSR)
+            self.assertEqual(stat.S_IMODE(private_config.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(hook_state.stat().st_mode), 0o600)
+
+            config = json.loads(private_config.read_text(encoding="utf-8"))
+            self.assertEqual(config["webhook_url"], WEBHOOK)
+            self.assertEqual(config["sign_secret"], "test-secret")
+            self.assertFalse(config["include_summary"])
+            self.assertTrue(config["include_cwd"])
+            self.assertEqual(config["summary_max_chars"], 321)
+            self.assertEqual(config["timeout_seconds"], 3.5)
+
+            self.assertEqual(config_toml.read_text(encoding="utf-8"), original_config)
+            hooks = json.loads(hooks_json.read_text(encoding="utf-8"))
+            self.assertEqual(hooks["hooks"]["Stop"][0], existing_hooks["hooks"]["Stop"][0])
+            feishu_groups = self.feishu_stop_groups(hooks)
+            self.assertEqual(len(feishu_groups), 1)
+            handler = feishu_groups[0]["hooks"][0]
+            self.assertEqual(handler["type"], "command")
+            self.assertEqual(handler["timeout"], 5)
+            self.assertIn(str(installed), handler["command"])
+
+    def test_reinstall_is_idempotent_and_updates_private_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            self.run_script(INSTALLER, home, "--webhook-url", WEBHOOK)
+            updated_webhook = WEBHOOK + "-updated"
+            self.run_script(
+                INSTALLER,
+                home,
+                "--webhook-url",
+                updated_webhook,
+                "--project-name",
+                "Migration Kit",
+            )
+
+            hooks = json.loads(
+                (home / ".codex" / "hooks.json").read_text(encoding="utf-8")
+            )
+            private_config = json.loads(
+                (home / ".config" / "codex-feishu" / "config.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(len(self.feishu_stop_groups(hooks)), 1)
+            self.assertEqual(private_config["webhook_url"], updated_webhook)
+            self.assertEqual(private_config["project_name"], "Migration Kit")
+            self.assertTrue(private_config["include_cwd"])
+
+    def test_install_ignores_existing_top_level_notify(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            config_toml = home / ".codex" / "config.toml"
+            config_toml.parent.mkdir(parents=True)
+            original = 'notify = ["bash", "/existing/notifier.sh"]\n[features]\nfoo = true\n'
+            config_toml.write_text(original, encoding="utf-8")
+
+            self.run_script(INSTALLER, home, "--webhook-url", WEBHOOK)
+
+            self.assertEqual(config_toml.read_text(encoding="utf-8"), original)
+            self.assertTrue(
+                (home / ".codex" / "hooks" / "codex_feishu_notify.py").exists()
+            )
+            self.assertTrue((home / ".codex" / "hooks.json").exists())
+
+    def test_install_refuses_malformed_hooks_without_writing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            hooks_json = home / ".codex" / "hooks.json"
+            hooks_json.parent.mkdir(parents=True)
+            original = "{not valid json\n"
+            hooks_json.write_text(original, encoding="utf-8")
+
+            result = self.run_script(
+                INSTALLER,
+                home,
+                "--webhook-url",
+                WEBHOOK,
+                expected=2,
+            )
+
+            self.assertIn("invalid hooks JSON", result.stderr)
+            self.assertEqual(hooks_json.read_text(encoding="utf-8"), original)
+            self.assertFalse(
+                (home / ".codex" / "hooks" / "codex_feishu_notify.py").exists()
+            )
+            self.assertFalse((home / ".config" / "codex-feishu").exists())
+
+    def test_install_refuses_unmanaged_matching_feishu_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            script_path = home / ".codex" / "hooks" / "codex_feishu_notify.py"
+            hooks_json = home / ".codex" / "hooks.json"
+            self.write_json(
+                hooks_json,
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": f"python3 {shlex.quote(str(script_path))}",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+            )
+
+            result = self.run_script(
+                INSTALLER,
+                home,
+                "--webhook-url",
+                WEBHOOK,
+                expected=2,
+            )
+
+            self.assertIn("existing unmanaged Feishu Stop Hook", result.stderr)
+            self.assertFalse((home / ".config" / "codex-feishu").exists())
+
+    def test_uninstall_preserves_other_hooks_and_private_config_unless_purged(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            hooks_json = home / ".codex" / "hooks.json"
+            existing_hooks = self.ottey_hooks()
+            self.write_json(hooks_json, existing_hooks)
+            self.run_script(INSTALLER, home, "--webhook-url", WEBHOOK)
+
+            self.run_script(UNINSTALLER, home)
+            self.assertFalse(
+                (home / ".codex" / "hooks" / "codex_feishu_notify.py").exists()
+            )
+            self.assertFalse(
+                (home / ".config" / "codex-feishu" / "user-hook-state.json").exists()
+            )
+            self.assertTrue(
+                (home / ".config" / "codex-feishu" / "config.json").exists()
+            )
+            self.assertEqual(
+                json.loads(hooks_json.read_text(encoding="utf-8")), existing_hooks
+            )
+
+            self.run_script(INSTALLER, home, "--webhook-url", WEBHOOK)
+            log_path = home / ".codex" / "log" / "feishu-notify.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text("failure\n", encoding="utf-8")
+            self.run_script(UNINSTALLER, home, "--purge")
+            self.assertFalse((home / ".config" / "codex-feishu").exists())
+            self.assertFalse(log_path.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
