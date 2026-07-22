@@ -218,7 +218,6 @@ payload = {
     "tag": os.environ["TAG"],
     "include_summary": os.environ["INCLUDE_SUMMARY"].lower() == "true",
     "summary_max_chars": int(os.environ["SUMMARY_MAX_CHARS"]),
-    "include_turn_id": True,
     "include_cwd": os.environ["INCLUDE_CWD"].lower() == "true",
     "timeout_seconds": float(os.environ["TIMEOUT_SECONDS"]),
 }

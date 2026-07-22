@@ -130,6 +130,7 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(config["summary_max_chars"], 321)
             self.assertEqual(config["timeout_seconds"], 3.5)
             self.assertEqual(config["tag"], "")
+            self.assertNotIn("include_turn_id", config)
 
             self.assertEqual(config_toml.read_text(encoding="utf-8"), original_config)
             hooks = json.loads(hooks_json.read_text(encoding="utf-8"))

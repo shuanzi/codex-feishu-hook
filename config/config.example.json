@@ -7,7 +7,6 @@
   "tag": "",
   "include_summary": true,
   "summary_max_chars": 600,
-  "include_turn_id": true,
   "include_cwd": true,
   "timeout_seconds": 4
 }

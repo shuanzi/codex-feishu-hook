@@ -89,6 +89,7 @@ class HttpIntegrationTests(unittest.TestCase):
             )
             self.assertIn("**项目：** integration-project", text)
             self.assertIn("All integration checks passed.", text)
+            self.assertNotIn("Turn", text)
             self.assertNotIn("private prompt", text)
             self.assertNotIn("/tmp/integration-project", text)
         finally:

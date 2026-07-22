@@ -127,7 +127,6 @@ def _message_parts(
     project = configured_project or (Path(cwd).name if cwd else "Unknown project")
     tag = " ".join(str(config.get("tag") or "").split())
 
-    turn_id = str(event_field(event, "turn-id", "turn_id", ""))
     assistant_message = event_field(
         event,
         "last-assistant-message",
@@ -147,18 +146,16 @@ def _message_parts(
         summary = ""
 
     title = str(config.get("title") or "✅ Codex 本轮已完成")
-    fields = [
-        ("项目", project),
-        ("时间", current.strftime("%Y-%m-%d %H:%M:%S %Z")),
-    ]
+    fields = []
     if tag:
         fields.append(("标签", tag))
 
-    if turn_id and bool(config.get("include_turn_id", True)):
-        fields.append(("Turn", turn_id[-12:]))
+    fields.append(("项目", project))
 
     if cwd and bool(config.get("include_cwd", True)):
         fields.append(("目录", cwd))
+
+    fields.append(("时间", current.strftime("%Y-%m-%d %H:%M:%S %Z")))
 
     return title, fields, summary
 
