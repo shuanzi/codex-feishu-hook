@@ -10,111 +10,101 @@ PRIVATE_CONFIG="$PRIVATE_DIR/config.json"
 HOOKS_FILE="$CODEX_HOME/hooks.json"
 HOOK_STATE="$PRIVATE_DIR/user-hook-state.json"
 
-WEBHOOK_URL="${FEISHU_WEBHOOK_URL:-}"
-SIGN_SECRET="${FEISHU_SIGN_SECRET:-}"
+WEBHOOK_URL=""
+SIGN_SECRET=""
 INCLUDE_SUMMARY=true
 INCLUDE_CWD=true
 SUMMARY_MAX_CHARS=600
-TIMEOUT_SECONDS=4
-PROJECT_NAME=""
 TAG=""
-TITLE="✅ Codex 本轮已完成"
 SEND_TEST=false
 
 usage() {
   cat <<'USAGE'
-Usage: ./install.sh [options]
+用法：./install.sh
 
-Options:
-  --webhook-url URL        Feishu custom-bot webhook URL.
-  --sign-secret SECRET     Optional Feishu signature secret.
-  --no-summary             Do not include the final Codex response summary.
-  --include-summary        Include the final Codex response summary (default).
-  --include-cwd            Include the absolute working directory (default).
-  --no-cwd                 Do not include the working directory.
-  --summary-max-chars N    Maximum summary length, 0-4000 (default: 600).
-  --timeout-seconds N      HTTP timeout, >0 and <=30 (default: 4).
-  --project-name NAME      Override the project name in notifications.
-  --tag TEXT               Add a tag to notifications.
-  --title TEXT             Override the notification title.
-  --send-test              Send a real test message after installation.
-  -h, --help               Show this help.
+安装器会以交互方式收集所有通知设置。
+请不要传入参数，以避免凭证写入 shell history。
 
-Environment:
-  FEISHU_WEBHOOK_URL, FEISHU_SIGN_SECRET, CODEX_HOME, XDG_CONFIG_HOME
+环境变量：
+  CODEX_HOME, XDG_CONFIG_HOME
 USAGE
 }
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --webhook-url)
-      [[ $# -ge 2 ]] || { echo "missing value for --webhook-url" >&2; exit 2; }
-      WEBHOOK_URL="$2"; shift 2 ;;
-    --sign-secret)
-      [[ $# -ge 2 ]] || { echo "missing value for --sign-secret" >&2; exit 2; }
-      SIGN_SECRET="$2"; shift 2 ;;
-    --no-summary)
-      INCLUDE_SUMMARY=false; shift ;;
-    --include-summary)
-      INCLUDE_SUMMARY=true; shift ;;
-    --include-cwd)
-      INCLUDE_CWD=true; shift ;;
-    --no-cwd)
-      INCLUDE_CWD=false; shift ;;
-    --summary-max-chars)
-      [[ $# -ge 2 ]] || { echo "missing value for --summary-max-chars" >&2; exit 2; }
-      SUMMARY_MAX_CHARS="$2"; shift 2 ;;
-    --timeout-seconds)
-      [[ $# -ge 2 ]] || { echo "missing value for --timeout-seconds" >&2; exit 2; }
-      TIMEOUT_SECONDS="$2"; shift 2 ;;
-    --project-name)
-      [[ $# -ge 2 ]] || { echo "missing value for --project-name" >&2; exit 2; }
-      PROJECT_NAME="$2"; shift 2 ;;
-    --tag)
-      [[ $# -ge 2 ]] || { echo "missing value for --tag" >&2; exit 2; }
-      TAG="$2"; shift 2 ;;
-    --title)
-      [[ $# -ge 2 ]] || { echo "missing value for --title" >&2; exit 2; }
-      TITLE="$2"; shift 2 ;;
-    --send-test)
-      SEND_TEST=true; shift ;;
-    -h|--help)
-      usage; exit 0 ;;
-    *)
-      echo "unknown option: $1" >&2
-      usage >&2
-      exit 2 ;;
-  esac
-done
-
-if [[ -z "$WEBHOOK_URL" ]]; then
-  if [[ -t 0 ]]; then
-    read -r -p "Feishu webhook URL: " WEBHOOK_URL
-  else
-    echo "--webhook-url is required in non-interactive mode" >&2
-    exit 2
+if [[ $# -gt 0 ]]; then
+  if [[ $# -eq 1 && ( "$1" == "-h" || "$1" == "--help" ) ]]; then
+    usage
+    exit 0
   fi
+  echo "install.sh 不接受命令行参数，请直接执行 ./install.sh。" >&2
+  usage >&2
+  exit 2
 fi
 
-python3 - "$WEBHOOK_URL" "$SUMMARY_MAX_CHARS" "$TIMEOUT_SECONDS" <<'PY'
+read_value() {
+  local prompt="$1"
+  local value
+  if ! read -r -p "$prompt" value; then
+    echo "安装已取消。" >&2
+    exit 2
+  fi
+  REPLY="$value"
+}
+
+read_yes_no() {
+  local prompt="$1"
+  local default="$2"
+  local value
+
+  while true; do
+    read_value "$prompt"
+    value="${REPLY:-$default}"
+    case "$value" in
+      y|Y) REPLY=true; return ;;
+      n|N) REPLY=false; return ;;
+      *) echo "请输入 y 或 n。" >&2 ;;
+    esac
+  done
+}
+
+while true; do
+  read_value "飞书机器人 Webhook URL（必填）: "
+  WEBHOOK_URL="$REPLY"
+  if [[ "$WEBHOOK_URL" == https://* ]]; then
+    break
+  fi
+  echo "Webhook URL 必须以 https:// 开头。" >&2
+done
+
+if ! read -r -s -p "飞书签名密钥（可选，直接回车跳过）: " SIGN_SECRET; then
+  echo >&2
+  echo "安装已取消。" >&2
+  exit 2
+fi
+echo
+
+read_yes_no "发送 Codex 最终回复摘要？[Y/n]: " y
+INCLUDE_SUMMARY="$REPLY"
+read_yes_no "发送绝对工作目录？[Y/n]: " y
+INCLUDE_CWD="$REPLY"
+
+while true; do
+  read_value "摘要上限（0～4000，默认 600）: "
+  SUMMARY_MAX_CHARS="${REPLY:-600}"
+  if [[ "$SUMMARY_MAX_CHARS" =~ ^[0-9]+$ ]] && python3 - "$SUMMARY_MAX_CHARS" <<'PY'
 import sys
 
-url, summary_raw, timeout_raw = sys.argv[1:]
-if not url.startswith("https://"):
-    raise SystemExit("webhook URL must start with https://")
-try:
-    summary = int(summary_raw)
-except ValueError:
-    raise SystemExit("summary-max-chars must be an integer")
-if not 0 <= summary <= 4000:
-    raise SystemExit("summary-max-chars must be between 0 and 4000")
-try:
-    timeout = float(timeout_raw)
-except ValueError:
-    raise SystemExit("timeout-seconds must be numeric")
-if not 0 < timeout <= 30:
-    raise SystemExit("timeout-seconds must be greater than 0 and at most 30")
+raise SystemExit(0 if int(sys.argv[1]) <= 4000 else 1)
 PY
+  then
+    break
+  fi
+  echo "摘要上限必须是 0～4000 的整数。" >&2
+done
+
+read_value "Hook 标签（可选，直接回车跳过）: "
+TAG="$REPLY"
+read_yes_no "安装后立即发送真实测试消息？[y/N]: " n
+SEND_TEST="$REPLY"
 
 # Validate the Hook file and any previously recorded managed state before
 # writing runtime or private configuration files.
@@ -199,10 +189,7 @@ SIGN_SECRET="$SIGN_SECRET" \
 INCLUDE_SUMMARY="$INCLUDE_SUMMARY" \
 INCLUDE_CWD="$INCLUDE_CWD" \
 SUMMARY_MAX_CHARS="$SUMMARY_MAX_CHARS" \
-TIMEOUT_SECONDS="$TIMEOUT_SECONDS" \
-PROJECT_NAME="$PROJECT_NAME" \
 TAG="$TAG" \
-TITLE="$TITLE" \
 TEMP_CONFIG="$TEMP_CONFIG" \
 python3 <<'PY'
 import json
@@ -213,13 +200,10 @@ payload = {
     "enabled": True,
     "webhook_url": os.environ["WEBHOOK_URL"],
     "sign_secret": os.environ["SIGN_SECRET"],
-    "title": os.environ["TITLE"],
-    "project_name": os.environ["PROJECT_NAME"],
     "tag": os.environ["TAG"],
     "include_summary": os.environ["INCLUDE_SUMMARY"].lower() == "true",
     "summary_max_chars": int(os.environ["SUMMARY_MAX_CHARS"]),
     "include_cwd": os.environ["INCLUDE_CWD"].lower() == "true",
-    "timeout_seconds": float(os.environ["TIMEOUT_SECONDS"]),
 }
 Path(os.environ["TEMP_CONFIG"]).write_text(
     json.dumps(payload, ensure_ascii=False, indent=2) + "\n",

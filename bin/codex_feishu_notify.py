@@ -145,7 +145,7 @@ def _message_parts(
     if not bool(config.get("include_summary", True)):
         summary = ""
 
-    title = str(config.get("title") or "✅ Codex 本轮已完成")
+    title = "✅ Codex 本轮已完成"
     fields = []
     if tag:
         fields.append(("标签", tag))

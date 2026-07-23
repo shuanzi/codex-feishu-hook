@@ -8,7 +8,7 @@
 
 - 每次 `Stop` 事件发送一张飞书交互式消息卡片。
 - 支持飞书机器人签名校验。
-- 支持项目名、标签、工作目录和最终回复摘要的开关与裁剪。
+- 支持标签、工作目录和最终回复摘要的开关与裁剪。
 - 不发送 `input-messages`，也不读取或上传完整会话 transcript。
 - 网络失败、飞书拒绝或配置错误默认只写本地日志，不阻塞 Codex 完成本轮工作。
 - 安装脚本幂等合并 `~/.codex/hooks.json`，不会覆盖无关 Hook 或顶层 `notify`。
@@ -53,33 +53,23 @@ Webhook URL 与签名密钥都应视为凭证，不要写入项目仓库、`AGEN
 cd codex-feishu-hook
 ```
 
-为避免把凭证写入 shell history，推荐通过临时环境变量输入：
+直接运行安装器，所有设置均会在交互中完成，凭证不会写入 shell history：
 
 ```bash
-read -r -p "Feishu Webhook URL: " FEISHU_WEBHOOK_URL
-read -r -s -p "Feishu 签名密钥（未开启签名可直接回车）: " FEISHU_SIGN_SECRET
-read -r -p "Hook 标签（可选，直接回车跳过）: " FEISHU_HOOK_TAG
-echo
-export FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET
-
-./install.sh \
-  --tag "$FEISHU_HOOK_TAG" \
-  --send-test
-
-unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET FEISHU_HOOK_TAG
+./install.sh
 ```
 
-标签会作为 `--tag` 参数传给安装器；直接回车时保存为空，后续通知不显示标签。
+安装器依次询问：
 
-没有开启飞书签名校验时，也可以直接执行：
+- 飞书机器人 Webhook URL：必填，必须以 `https://` 开头。
+- 飞书签名密钥：可选，输入时隐藏；未开启签名校验可直接回车。
+- 是否发送最终回复摘要：`Y/n`，默认发送。
+- 是否发送绝对工作目录：`Y/n`，默认发送。
+- 摘要上限：`0～4000`，默认 `600`。
+- Hook 标签：可选；为空时通知不显示标签。
+- 是否立即发送真实测试消息：`y/N`，默认不发送。
 
-```bash
-./install.sh \
-  --webhook-url 'https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxx' \
-  --send-test
-```
-
-注意：直接把签名密钥写在命令参数中，可能进入 shell history 或短暂出现在进程列表中；正式环境优先使用环境变量交互输入方式。
+安装器不接受上述设置的命令行参数或凭证环境变量。重复执行 `./install.sh` 会重新收集并更新私有配置。
 
 安装完成后重启 Codex。
 
@@ -117,53 +107,6 @@ unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET FEISHU_HOOK_TAG
 
 如果已有 `hooks.json`，安装器会追加独立的 `Stop` Hook group，保留 Otty、其他 Hook 和现有顶层 `notify`。重启 Codex 后使用 `/hooks` 审核并信任新增 Hook。
 
-## 四、常用安装参数
-
-```text
---webhook-url URL        飞书机器人 Webhook
---sign-secret SECRET     签名密钥
---no-summary             不发送 Codex 最终回复摘要
---include-summary        发送摘要，默认开启
---include-cwd            发送绝对工作目录，默认开启
---no-cwd                 不发送绝对工作目录
---summary-max-chars N    摘要上限，0～4000，默认 600
---timeout-seconds N      网络超时，最大 30 秒，默认 4 秒
---project-name NAME      固定覆盖项目名
---tag TEXT               在项目前显示的标签
---title TEXT             自定义消息标题
---send-test              安装后立即发送真实测试消息
-```
-
-例如，只发送低敏感元数据：
-
-```bash
-./install.sh \
-  --webhook-url "$FEISHU_WEBHOOK_URL" \
-  --sign-secret "$FEISHU_SIGN_SECRET" \
-  --no-summary
-```
-
-例如，隐藏工作目录并把摘要限制在 300 字：
-
-```bash
-./install.sh \
-  --webhook-url "$FEISHU_WEBHOOK_URL" \
-  --no-cwd \
-  --summary-max-chars 300
-```
-
-例如，为这一套 Hook 通知标记发布阶段：
-
-```bash
-./install.sh \
-  --webhook-url "$FEISHU_WEBHOOK_URL" \
-  --tag "P6"
-```
-
-`--tag` 是安装级配置：重装时可更新，之后的每条通知都会携带该标签；未设置或仅包含空白时不显示。
-
-重复执行安装命令会更新脚本和私有配置，不会重复添加飞书 `Stop` Hook。
-
 ## 五、通知示例
 
 飞书中会显示为绿色 Header 的宽屏消息卡片，项目元数据和结果摘要分区展示：
@@ -186,7 +129,7 @@ unset FEISHU_WEBHOOK_URL FEISHU_SIGN_SECRET FEISHU_HOOK_TAG
 - 最终回复会去掉多余空行并截断到 600 字。
 - 不发送用户输入。
 - 不发送 thread ID。
-- 默认发送绝对工作目录；使用 `--no-cwd` 可关闭。
+- 默认发送绝对工作目录；可在安装交互中关闭。
 
 ## 六、手工测试
 
@@ -221,13 +164,10 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/codex-feishu/config.json
   "enabled": true,
   "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/replace-me",
   "sign_secret": "",
-  "title": "✅ Codex 本轮已完成",
-  "project_name": "",
   "tag": "",
   "include_summary": true,
   "summary_max_chars": 600,
-  "include_cwd": true,
-  "timeout_seconds": 4
+  "include_cwd": true
 }
 ```
 
