@@ -92,6 +92,16 @@ class NotifierTests(unittest.TestCase):
         self.assertNotIn("thread-secret", message)
         self.assertNotIn("/work/android-to-harmonyos", message)
 
+    def test_build_message_ignores_legacy_custom_title(self) -> None:
+        message = notifier.build_message(
+            {"type": "agent-turn-complete", "cwd": "/work/sample"},
+            {"title": "自定义标题", "summary_max_chars": 0},
+            now=datetime(2026, 7, 22, 15, 30, tzinfo=timezone.utc),
+        )
+
+        self.assertTrue(message.startswith("✅ Codex 本轮已完成\n"))
+        self.assertNotIn("自定义标题", message)
+
     def test_build_message_supports_stop_hook_fields(self) -> None:
         event = {
             "hook_event_name": "Stop",

@@ -22,6 +22,7 @@ class InstallerTests(unittest.TestCase):
         script: Path,
         home: Path,
         *args: str,
+        input_text: str = "",
         expected: int = 0,
     ) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
@@ -32,6 +33,7 @@ class InstallerTests(unittest.TestCase):
             cwd=ROOT,
             env=env,
             text=True,
+            input=input_text,
             capture_output=True,
             check=False,
         )
@@ -41,6 +43,28 @@ class InstallerTests(unittest.TestCase):
             msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
         return result
+
+    @staticmethod
+    def install_answers(
+        webhook: str = WEBHOOK,
+        sign_secret: str = "",
+        include_summary: str = "",
+        include_cwd: str = "",
+        summary_max_chars: str = "",
+        tag: str = "",
+        send_test: str = "",
+    ) -> str:
+        return "\n".join(
+            [
+                webhook,
+                sign_secret,
+                include_summary,
+                include_cwd,
+                summary_max_chars,
+                tag,
+                send_test,
+            ]
+        ) + "\n"
 
     @staticmethod
     def ottey_hooks() -> dict[str, object]:
@@ -102,16 +126,14 @@ class InstallerTests(unittest.TestCase):
             self.run_script(
                 INSTALLER,
                 home,
-                "--webhook-url",
-                WEBHOOK,
-                "--sign-secret",
-                "test-secret",
-                "--no-summary",
-                "--include-cwd",
-                "--summary-max-chars",
-                "321",
-                "--timeout-seconds",
-                "3.5",
+                input_text=self.install_answers(
+                    sign_secret="test-secret",
+                    include_summary="n",
+                    include_cwd="y",
+                    summary_max_chars="321",
+                    tag=" P6 ",
+                    send_test="n",
+                ),
             )
 
             installed = home / ".codex" / "hooks" / "codex_feishu_notify.py"
@@ -128,9 +150,10 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse(config["include_summary"])
             self.assertTrue(config["include_cwd"])
             self.assertEqual(config["summary_max_chars"], 321)
-            self.assertEqual(config["timeout_seconds"], 3.5)
-            self.assertEqual(config["tag"], "")
-            self.assertNotIn("include_turn_id", config)
+            self.assertEqual(config["tag"], "P6")
+            self.assertNotIn("title", config)
+            self.assertNotIn("project_name", config)
+            self.assertNotIn("timeout_seconds", config)
 
             self.assertEqual(config_toml.read_text(encoding="utf-8"), original_config)
             hooks = json.loads(hooks_json.read_text(encoding="utf-8"))
@@ -142,10 +165,61 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(handler["timeout"], 5)
             self.assertIn(str(installed), handler["command"])
 
+    def test_install_reprompts_invalid_interactive_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            result = self.run_script(
+                INSTALLER,
+                home,
+                input_text="\n".join(
+                    [
+                        "http://invalid",
+                        WEBHOOK,
+                        "",
+                        "maybe",
+                        "n",
+                        "maybe",
+                        "n",
+                        "4001",
+                        "321",
+                        "",
+                        "maybe",
+                        "n",
+                    ]
+                )
+                + "\n",
+            )
+
+            config = json.loads(
+                (home / ".config" / "codex-feishu" / "config.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertIn("Webhook URL 必须以 https:// 开头", result.stderr)
+            self.assertEqual(result.stderr.count("请输入 y 或 n。"), 3)
+            self.assertIn("摘要上限必须是 0～4000 的整数。", result.stderr)
+            self.assertFalse(config["include_summary"])
+            self.assertFalse(config["include_cwd"])
+            self.assertEqual(config["summary_max_chars"], 321)
+
+    def test_install_rejects_legacy_command_line_options(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            result = self.run_script(
+                INSTALLER,
+                home,
+                "--webhook-url",
+                WEBHOOK,
+                expected=2,
+            )
+
+            self.assertIn("不接受命令行参数", result.stderr)
+            self.assertFalse((home / ".config" / "codex-feishu").exists())
+
     def test_reinstall_is_idempotent_and_updates_private_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
-            self.run_script(INSTALLER, home, "--webhook-url", WEBHOOK)
+            self.run_script(INSTALLER, home, input_text=self.install_answers())
             installed = home / ".codex" / "hooks" / "codex_feishu_notify.py"
             installed.write_text("# old hook content\n", encoding="utf-8")
             installed.chmod(0o600)
@@ -153,12 +227,10 @@ class InstallerTests(unittest.TestCase):
             self.run_script(
                 INSTALLER,
                 home,
-                "--webhook-url",
-                updated_webhook,
-                "--project-name",
-                "Migration Kit",
-                "--tag",
-                " P6 ",
+                input_text=self.install_answers(
+                    webhook=updated_webhook,
+                    tag=" P6 ",
+                ),
             )
 
             hooks = json.loads(
@@ -178,8 +250,7 @@ class InstallerTests(unittest.TestCase):
             )
             self.assertTrue(installed.stat().st_mode & stat.S_IXUSR)
             self.assertEqual(private_config["webhook_url"], updated_webhook)
-            self.assertEqual(private_config["project_name"], "Migration Kit")
-            self.assertEqual(private_config["tag"], " P6 ")
+            self.assertEqual(private_config["tag"], "P6")
             self.assertTrue(private_config["include_cwd"])
 
     def test_install_ignores_existing_top_level_notify(self) -> None:
@@ -190,7 +261,7 @@ class InstallerTests(unittest.TestCase):
             original = 'notify = ["bash", "/existing/notifier.sh"]\n[features]\nfoo = true\n'
             config_toml.write_text(original, encoding="utf-8")
 
-            self.run_script(INSTALLER, home, "--webhook-url", WEBHOOK)
+            self.run_script(INSTALLER, home, input_text=self.install_answers())
 
             self.assertEqual(config_toml.read_text(encoding="utf-8"), original)
             self.assertTrue(
@@ -209,8 +280,7 @@ class InstallerTests(unittest.TestCase):
             result = self.run_script(
                 INSTALLER,
                 home,
-                "--webhook-url",
-                WEBHOOK,
+                input_text=self.install_answers(),
                 expected=2,
             )
 
@@ -247,8 +317,7 @@ class InstallerTests(unittest.TestCase):
             result = self.run_script(
                 INSTALLER,
                 home,
-                "--webhook-url",
-                WEBHOOK,
+                input_text=self.install_answers(),
                 expected=2,
             )
 
@@ -261,7 +330,7 @@ class InstallerTests(unittest.TestCase):
             hooks_json = home / ".codex" / "hooks.json"
             existing_hooks = self.ottey_hooks()
             self.write_json(hooks_json, existing_hooks)
-            self.run_script(INSTALLER, home, "--webhook-url", WEBHOOK)
+            self.run_script(INSTALLER, home, input_text=self.install_answers())
 
             self.run_script(UNINSTALLER, home)
             self.assertFalse(
@@ -277,7 +346,7 @@ class InstallerTests(unittest.TestCase):
                 json.loads(hooks_json.read_text(encoding="utf-8")), existing_hooks
             )
 
-            self.run_script(INSTALLER, home, "--webhook-url", WEBHOOK)
+            self.run_script(INSTALLER, home, input_text=self.install_answers())
             log_path = home / ".codex" / "log" / "feishu-notify.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             log_path.write_text("failure\n", encoding="utf-8")
