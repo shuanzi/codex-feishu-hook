@@ -45,7 +45,7 @@ codex-feishu-hook/
 
 Webhook URL 与签名密钥都应视为凭证，不要写入项目仓库、`AGENTS.md` 或可提交的 `.codex/` 文件。
 
-## 二、推荐安装方式
+## 二、安装或更新
 
 解压后进入目录：
 
@@ -68,6 +68,18 @@ cd codex-feishu-hook
 - 摘要上限：`0～4000`，默认 `600`。
 - Hook 标签：可选；为空时通知不显示标签。
 - 是否立即发送真实测试消息：`y/N`，默认不发送。
+
+典型交互如下；签名密钥的实际输入不会回显：
+
+```text
+飞书机器人 Webhook URL（必填）: https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxx
+飞书签名密钥（可选，直接回车跳过）: [hidden]
+发送 Codex 最终回复摘要？[Y/n]: y
+发送绝对工作目录？[Y/n]: y
+摘要上限（0～4000，默认 600）:
+Hook 标签（可选，直接回车跳过）: P6
+安装后立即发送真实测试消息？[y/N]: n
+```
 
 安装器不接受上述设置的命令行参数或凭证环境变量。重复执行 `./install.sh` 会重新收集并更新私有配置。
 
@@ -107,7 +119,7 @@ cd codex-feishu-hook
 
 如果已有 `hooks.json`，安装器会追加独立的 `Stop` Hook group，保留 Otty、其他 Hook 和现有顶层 `notify`。重启 Codex 后使用 `/hooks` 审核并信任新增 Hook。
 
-## 五、通知示例
+## 四、通知示例
 
 飞书中会显示为绿色 Header 的宽屏消息卡片，项目元数据和结果摘要分区展示：
 
@@ -131,7 +143,7 @@ cd codex-feishu-hook
 - 不发送 thread ID。
 - 默认发送绝对工作目录；可在安装交互中关闭。
 
-## 六、手工测试
+## 五、手工测试
 
 使用已经安装的私有配置发送测试事件：
 
@@ -149,7 +161,7 @@ python3 bin/codex_feishu_notify.py < examples/stop-event.json
 
 `CODEX_FEISHU_STRICT=1` 只建议用于手工测试：发送失败时返回非零状态并把错误写到 stderr。Codex 正常调用时不启用 strict，以确保通知异常不会影响任务完成。
 
-## 七、私有配置
+## 六、私有配置
 
 默认位置：
 
@@ -183,13 +195,13 @@ CODEX_HOME=/custom/codex/home
 XDG_CONFIG_HOME=/custom/config/home
 ```
 
-## 八、Hook 信任
+## 七、Hook 信任
 
 安装器会把飞书处理器追加到用户级 `~/.codex/hooks.json`。Codex 会并发运行同一 `Stop` 事件的所有匹配 Hook，因此它可以与现有 Computer Use `notify`、Otty Hook 及其他 Hook 同时生效。
 
 新增或变更的非托管 Hook 需要审核。重启 Codex 后执行 `/hooks`，检查命令路径并信任飞书 Hook。适配器从 stdin 读取 `Stop` 事件，向 stdout 输出合法 JSON，且通知失败只写本地日志，不会阻止本轮结束。
 
-## 九、错误处理与排查
+## 八、错误处理与排查
 
 默认日志：
 
